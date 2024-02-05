@@ -32,9 +32,11 @@ apt-get update -y
 apt-get install -y --no-install-recommends \
   build-essential \
   ca-certificates \
+  doxygen \
   gcc-10=10.5.* \
   g++-10=10.5.* \
   git \
+  graphviz \
   libayatana-appindicator3-dev \
   libavdevice-dev \
   libboost-filesystem-dev=1.71.* \
@@ -61,6 +63,8 @@ apt-get install -y --no-install-recommends \
   libxfixes-dev \
   libxrandr-dev \
   libxtst-dev \
+  python3.9 \
+  python3.9-venv \
   udev \
   wget
 if [[ "${TARGETPLATFORM}" == 'linux/amd64' ]]; then
@@ -169,6 +173,15 @@ cmake \
 make -j "$(nproc)"
 cpack -G DEB
 _MAKE
+
+# run tests
+WORKDIR /build/sunshine/build/tests
+# hadolint ignore=SC1091
+RUN <<_TEST
+#!/bin/bash
+set -e
+./sunshine_tests --gtest_color=yes
+_TEST
 
 FROM scratch AS artifacts
 ARG BASE

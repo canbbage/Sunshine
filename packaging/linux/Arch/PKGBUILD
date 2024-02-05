@@ -7,7 +7,7 @@ pkgrel=1
 pkgdesc="@PROJECT_DESCRIPTION@"
 arch=('x86_64' 'aarch64')
 url=@PROJECT_HOMEPAGE_URL@
-license=('GPL3')
+license=('GPL-3.0-only')
 
 depends=('avahi'
          'boost-libs'
@@ -28,9 +28,13 @@ depends=('avahi'
          'numactl'
          'openssl'
          'opus'
+         'python'
          'udev')
+checkdepends=('doxygen'
+              'graphviz')
 makedepends=('boost'
              'cmake'
+             'gcc12'
              'git'
              'make'
              'nodejs'
@@ -54,6 +58,9 @@ build() {
     export BUILD_VERSION="@GITHUB_BUILD_VERSION@"
     export COMMIT="@GITHUB_COMMIT@"
 
+    export CC=gcc-12
+    export CXX=g++-12
+
     export CFLAGS="${CFLAGS/-Werror=format-security/}"
     export CXXFLAGS="${CXXFLAGS/-Werror=format-security/}"
 
@@ -67,6 +74,14 @@ build() {
         -D SUNSHINE_ASSETS_DIR="share/sunshine"
 
     make -C build
+}
+
+check() {
+   export CC=gcc-12
+   export CXX=g++-12
+
+   cd "${srcdir}/build/tests"
+   ./sunshine_tests --gtest_color=yes
 }
 
 package() {

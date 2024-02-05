@@ -32,9 +32,11 @@ dnf -y group install "Development Tools"
 dnf -y install \
   boost-devel-1.78.0* \
   cmake-3.27.* \
+  doxygen \
   gcc-13.2.* \
   gcc-c++-13.2.* \
   git \
+  graphviz \
   libappindicator-gtk3-devel \
   libcap-devel \
   libcurl-devel \
@@ -58,6 +60,7 @@ dnf -y install \
   openssl-devel \
   opus-devel \
   pulseaudio-libs-devel \
+  python3.10 \
   rpm-build \
   wget \
   which
@@ -118,6 +121,15 @@ cmake \
 make -j "$(nproc)"
 cpack -G RPM
 _MAKE
+
+# run tests
+WORKDIR /build/sunshine/build/tests
+# hadolint ignore=SC1091
+RUN <<_TEST
+#!/bin/bash
+set -e
+./sunshine_tests --gtest_color=yes
+_TEST
 
 FROM scratch AS artifacts
 ARG BASE

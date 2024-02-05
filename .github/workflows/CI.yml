@@ -160,12 +160,12 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v8
         with:
-          root-reserve-mb: 10240
+          root-reserve-mb: 20480
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
-          remove-docker-images: 'false'
+          remove-docker-images: 'true'
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -286,12 +286,14 @@ jobs:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v8
         with:
-          root-reserve-mb: 30720
+          root-reserve-mb: 20480
+          swap-size-mb: 8192
+          temp-reserve-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
-          remove-docker-images: 'false'
+          remove-docker-images: 'true'
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -342,8 +344,10 @@ jobs:
 
           sudo apt-get install -y \
             build-essential \
+            doxygen \
             gcc-10 \
             g++-10 \
+            graphviz \
             libayatana-appindicator3-dev \
             libavdevice-dev \
             libcap-dev \
@@ -367,6 +371,8 @@ jobs:
             libxfixes-dev \
             libxrandr-dev \
             libxtst-dev \
+            python3 \
+            python3-venv \
             wget
 
           # clean apt cache
@@ -387,8 +393,14 @@ jobs:
             https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run \
             --progress=bar:force:noscroll -q --show-progress -O /root/cuda.run
           sudo chmod a+x /root/cuda.run
-          sudo /root/cuda.run --silent --toolkit --toolkitpath=/usr --no-opengl-libs --no-man-page --no-drm
+          sudo /root/cuda.run --silent --toolkit --toolkitpath=/usr/local/cuda --no-opengl-libs --no-man-page --no-drm
           sudo rm /root/cuda.run
+
+      - name: Setup python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Build Linux
         env:
@@ -403,6 +415,7 @@ jobs:
           cmake \
             -DBUILD_WERROR=ON \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CUDA_COMPILER:PATH=/usr/local/cuda/bin/nvcc \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DSUNSHINE_ASSETS_DIR=share/sunshine \
             -DSUNSHINE_EXECUTABLE_PATH=/usr/bin/sunshine \
@@ -475,6 +488,11 @@ jobs:
           # permissions
           chmod +x ../artifacts/sunshine.AppImage
 
+      - name: Delete cuda
+        # free up space on the runner
+        run: |
+          sudo rm -rf /usr/local/cuda
+
       - name: Verify AppImage
         if: ${{ matrix.type == 'AppImage' }}
         run: |
@@ -490,6 +508,29 @@ jobs:
         with:
           name: sunshine-linux-${{ matrix.type }}-${{ matrix.dist }}
           path: artifacts/
+
+      - name: Run tests
+        id: test
+        working-directory: build/tests
+        run: |
+          ./sunshine_tests --gtest_color=yes
+
+      - name: Generate gcov report
+        # any except canceled or skipped
+        if: always() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure')
+        id: test_report
+        working-directory: build
+        run: |
+          ${{ steps.python.outputs.python-path }} -m pip install gcovr
+          ${{ steps.python.outputs.python-path }} -m gcovr -r .. --xml-pretty -o coverage.xml
+
+      - name: Upload coverage
+        # any except canceled or skipped
+        if: always() && (steps.test_report.outcome == 'success')
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./build/coverage.xml
+          flags: ${{ runner.os }}
 
       - name: Create/Update GitHub Release
         if: ${{ needs.setup_release.outputs.create_release == 'true' }}
@@ -528,6 +569,8 @@ jobs:
 
           # by installing boost from source, several headers cannot be found...
           # the above commented out link only works if boost is installed from homebrew... does not make sense
+
+          # fix openssl header not found
           ln -sf $(find /usr/local/Cellar -type d -name "openssl" -path "*/openssl@3/*/include" | head -n 1) \
             /usr/local/include/openssl
 
@@ -539,10 +582,16 @@ jobs:
           ln -sf $(find /usr/local/Cellar -type d -name "miniupnpc" -path "*/miniupnpc/*/include" | head -n 1) \
             /usr/local/include/miniupnpc
 
+      - name: Setup python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install Boost
         # installing boost from homebrew takes 30 minutes in a GitHub runner
         run: |
-          export BOOST_ROOT=${HOME}/boost-${BOOST_VERSION}
+          export BOOST_ROOT=/usr/local
 
           # install boost
           wget \
@@ -584,6 +633,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DSUNSHINE_ASSETS_DIR=local/sunshine/assets \
             -DSUNSHINE_EXECUTABLE_PATH=/usr/bin/sunshine \
+            -DTESTS_ENABLE_PYTHON_TESTS=OFF \
             ..
           make -j $(sysctl -n hw.ncpu)
 
@@ -598,6 +648,29 @@ jobs:
 
           # cpack -G Bundle
           # mv ./cpack_artifacts/Sunshine.dmg ../artifacts/sunshine-bundle.dmg
+
+      - name: Run tests
+        id: test
+        working-directory: build/tests
+        run: |
+          ./sunshine_tests --gtest_color=yes
+
+      - name: Generate gcov report
+        # any except canceled or skipped
+        if: always() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure')
+        id: test_report
+        working-directory: build
+        run: |
+          ${{ steps.python.outputs.python-path }} -m pip install gcovr
+          ${{ steps.python.outputs.python-path }} -m gcovr -r .. --xml-pretty -o coverage.xml
+
+      - name: Upload coverage
+        # any except canceled or skipped
+        if: always() && (steps.test_report.outcome == 'success')
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./build/coverage.xml
+          flags: ${{ runner.os }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -703,6 +776,7 @@ jobs:
       - name: Build port
         env:
           subportlist: ${{ steps.subportlist.outputs.subportlist }}
+        id: build
         run: |
           subport="Sunshine"
 
@@ -729,6 +803,17 @@ jobs:
         with:
           name: sunshine-macports
           path: artifacts/
+
+      - name: Run tests
+        id: tests
+        run: |
+          sudo port test "Sunshine"
+
+      - name: Logs
+        if: always()
+        run: |
+          cat \
+           /opt/local/var/macports/logs/_Users_runner_work_Sunshine_Sunshine_ports_multimedia_Sunshine/Sunshine/main.log
 
       - name: Create/Update GitHub Release
         if: ${{ needs.setup_release.outputs.create_release == 'true' }}
@@ -762,12 +847,14 @@ jobs:
           install: >-
             base-devel
             diffutils
+            doxygen
             git
             make
             mingw-w64-x86_64-binutils
             mingw-w64-x86_64-boost
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-curl
+            mingw-w64-x86_64-graphviz
             mingw-w64-x86_64-miniupnpc
             mingw-w64-x86_64-nlohmann-json
             mingw-w64-x86_64-nodejs
@@ -779,6 +866,24 @@ jobs:
             nasm
             wget
             yasm
+
+      - name: Setup python
+        # use this instead of msys2 python due to known issues using wheels, https://www.msys2.org/docs/python/
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python Path
+        id: python-path
+        shell: msys2 {0}
+        run: |
+          # replace backslashes with double backslashes
+          python_path=$(echo "${{ steps.setup-python.outputs.python-path }}" | sed 's/\\/\\\\/g')
+
+          # step output
+          echo "python-path=${python_path}"
+          echo "python-path=${python_path}" >> $GITHUB_OUTPUT
 
       - name: Build Windows
         shell: msys2 {0}
@@ -793,6 +898,7 @@ jobs:
             -DBUILD_WERROR=ON \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DSUNSHINE_ASSETS_DIR=assets \
+            -DTESTS_PYTHON_EXECUTABLE='${{ steps.python-path.outputs.python-path }}' \
             -G "MinGW Makefiles" \
             ..
           mingw32-make -j$(nproc)
@@ -810,6 +916,31 @@ jobs:
           # move
           mv ./cpack_artifacts/Sunshine.exe ../artifacts/sunshine-windows-installer.exe
           mv ./cpack_artifacts/Sunshine.zip ../artifacts/sunshine-windows-portable.zip
+
+      - name: Run tests
+        id: test
+        shell: msys2 {0}
+        working-directory: build/tests
+        run: |
+          ./sunshine_tests.exe --gtest_color=yes
+
+      - name: Generate gcov report
+        # any except canceled or skipped
+        if: always() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure')
+        id: test_report
+        shell: msys2 {0}
+        working-directory: build
+        run: |
+          ${{ steps.python-path.outputs.python-path }} -m pip install gcovr
+          ${{ steps.python-path.outputs.python-path }} -m gcovr -r .. --xml-pretty -o coverage.xml
+
+      - name: Upload coverage
+        # any except canceled or skipped
+        if: always() && (steps.test_report.outcome == 'success')
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./build/coverage.xml
+          flags: ${{ runner.os }}
 
       - name: Package Windows Debug Info
         working-directory: build

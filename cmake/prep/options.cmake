@@ -1,3 +1,6 @@
+option(BUILD_TESTS "Build tests" ON)
+option(TESTS_ENABLE_PYTHON_TESTS "Enable Python tests" ON)
+
 option(BUILD_WERROR "Enable -Werror flag." OFF)
 
 # if this option is set, the build will exit after configuring special package configuration files
