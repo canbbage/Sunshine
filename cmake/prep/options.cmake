@@ -13,6 +13,8 @@ option(CUDA_INHERIT_COMPILE_OPTIONS
         your IDE throws errors about unknown flags after running cmake." ON)
 
 if(APPLE)
+    option(SUNSHINE_CONFIGURE_HOMEBREW
+            "Configure macOS Homebrew formula. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
     option(SUNSHINE_CONFIGURE_PORTFILE
             "Configure macOS Portfile. Recommended to use with SUNSHINE_CONFIGURE_ONLY" OFF)
     option(SUNSHINE_PACKAGE_MACOS
