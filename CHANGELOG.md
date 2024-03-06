@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1] - 2024-03-05
+**Fixed**
+- (Build/macOS) Fix issues building on macOS 13 and 14
+- (Build/Linux) Ensure correct pkg archive is published to GitHub releases
+- (Capture/Linux) Fix mismatched case and unhandled exception in CUDA device lookup
+- (Config) Add missing resolution to default config ui
+
 ## [0.22.0] - 2024-03-03
 **Breaking**
 - (Network) Clients must now be paired with the host before they can use Wake-on-LAN
@@ -720,3 +727,4 @@ settings. In v0.17.0, games now run under your user account without elevated pri
 [0.20.0]: https://github.com/LizardByte/Sunshine/releases/tag/v0.20.0
 [0.21.0]: https://github.com/LizardByte/Sunshine/releases/tag/v0.21.0
 [0.22.0]: https://github.com/LizardByte/Sunshine/releases/tag/v0.22.0
+[0.22.1]: https://github.com/LizardByte/Sunshine/releases/tag/v0.22.1
