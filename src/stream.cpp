@@ -109,12 +109,19 @@ namespace stream {
     // zero padding, such as AV1 (Sunshine extension).
     boost::endian::little_uint16_at lastPayloadLen;
 
-    std::uint8_t unknown[2];
+    // 原有的unknown字段，现在用于存储traceId
+    boost::endian::little_uint32_at traceId;  // 扩展为4字节，原来是2字节unknown
+
+    // 添加三个时间戳字段
+    // 使用相对时间戳，以纳秒为单位
+    boost::endian::little_uint64_at inputArrivalTimeNs;
+    boost::endian::little_uint64_at encodeStartTimeNs;
+    boost::endian::little_uint64_at encodeEndTimeNs;
   };
 
   static_assert(
-    sizeof(video_short_frame_header_t) == 8,
-    "Short frame header must be 8 bytes"
+    sizeof(video_short_frame_header_t) == 34,
+    "Extended frame header must be 34 bytes"
   );
 
   struct video_packet_raw_t {
@@ -1319,6 +1326,38 @@ namespace stream {
       frame_header.lastPayloadLen = (payload.size() + sizeof(frame_header)) % (session->config.packetsize - sizeof(NV_VIDEO_PACKET));
       if (frame_header.lastPayloadLen == 0) {
         frame_header.lastPayloadLen = session->config.packetsize - sizeof(NV_VIDEO_PACKET);
+      }
+
+      // 填充trace信息
+      auto packet_raw = dynamic_cast<video::packet_raw_generic*>(packet.get());
+      if (packet_raw) {
+        frame_header.traceId = packet_raw->trace_id;
+        
+        if (packet_raw->has_trace) {
+          // 转换时间戳为纳秒
+          frame_header.inputArrivalTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            packet_raw->input_arrival_time.time_since_epoch()).count();
+          frame_header.encodeStartTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            packet_raw->encode_start_time.time_since_epoch()).count();
+          frame_header.encodeEndTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            packet_raw->encode_end_time.time_since_epoch()).count();
+            
+          BOOST_LOG(verbose) << "Sending frame with traceId: " << frame_header.traceId
+                            << ", input time: " << frame_header.inputArrivalTimeNs
+                            << ", encode start: " << frame_header.encodeStartTimeNs
+                            << ", encode end: " << frame_header.encodeEndTimeNs;
+        } else {
+          // 如果没有trace信息，则设置为0
+          frame_header.inputArrivalTimeNs = 0;
+          frame_header.encodeStartTimeNs = 0;
+          frame_header.encodeEndTimeNs = 0;
+        }
+      } else {
+        // 如果不是packet_raw_generic类型，则设置为0
+        frame_header.traceId = 0;
+        frame_header.inputArrivalTimeNs = 0;
+        frame_header.encodeStartTimeNs = 0;
+        frame_header.encodeEndTimeNs = 0;
       }
 
       if (packet->frame_timestamp) {

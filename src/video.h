@@ -9,6 +9,8 @@
 #include "platform/common.h"
 #include "thread_safe.h"
 #include "video_colorspace.h"
+#include <mutex>
+#include <unordered_map>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -290,7 +292,9 @@ namespace video {
     packet_raw_generic(std::vector<uint8_t> &&frame_data, int64_t frame_index, bool idr):
         frame_data {std::move(frame_data)},
         index {frame_index},
-        idr {idr} {
+        idr {idr},
+        trace_id {0},
+        has_trace {false} {
     }
 
     bool is_idr() override {
@@ -312,6 +316,13 @@ namespace video {
     std::vector<uint8_t> frame_data;
     int64_t index;
     bool idr;
+    
+    // 新增字段
+    uint32_t trace_id;
+    bool has_trace;
+    std::chrono::steady_clock::time_point input_arrival_time;
+    std::chrono::steady_clock::time_point encode_start_time;
+    std::chrono::steady_clock::time_point encode_end_time;
   };
 
   using packet_t = std::unique_ptr<packet_raw_t>;
@@ -352,4 +363,14 @@ namespace video {
    * @warning This is only safe to call when there is no client actively streaming.
    */
   int probe_encoders();
+
+  struct TraceInfo {
+    std::chrono::steady_clock::time_point input_arrival_time;
+    std::chrono::steady_clock::time_point encode_start_time;
+    std::chrono::steady_clock::time_point encode_end_time;
+    std::atomic<bool> encode_start_recorded{false};
+    std::atomic<bool> encode_end_recorded{false};
+  };
+  extern std::unordered_map<uint32_t, TraceInfo> g_trace_map;
+  extern std::mutex g_trace_map_mutex;
 }  // namespace video

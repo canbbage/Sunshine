@@ -40,6 +40,9 @@ using namespace std::literals;
 
 namespace video {
 
+  std::unordered_map<uint32_t, TraceInfo> g_trace_map;
+  std::mutex g_trace_map_mutex;
+
   namespace {
     /**
      * @brief Check if we can allow probing for the encoders.
@@ -1423,7 +1426,34 @@ namespace video {
   }
 
   int encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+    uint32_t traceId = 0;
+    std::chrono::steady_clock::time_point input_arrival_time, encode_start_time, encode_end_time;
+    bool has_trace = false;
+    {
+        std::lock_guard<std::mutex> lock(g_trace_map_mutex);
+        for (auto &kv : g_trace_map) {
+            if (!kv.second.encode_start_recorded) {
+                traceId = kv.first;
+                input_arrival_time = kv.second.input_arrival_time;
+                kv.second.encode_start_time = std::chrono::steady_clock::now();
+                kv.second.encode_start_recorded = true;
+                has_trace = true;
+                break;
+            }
+        }
+    }
+    if (has_trace) {
+        encode_start_time = g_trace_map[traceId].encode_start_time;
+    }
+    // 编码开始
     auto encoded_frame = session.encode_frame(frame_nr);
+    // 编码结束
+    if (has_trace) {
+        std::lock_guard<std::mutex> lock(g_trace_map_mutex);
+        g_trace_map[traceId].encode_end_time = std::chrono::steady_clock::now();
+        g_trace_map[traceId].encode_end_recorded = true;
+        encode_end_time = g_trace_map[traceId].encode_end_time;
+    }
     if (encoded_frame.data.empty()) {
       BOOST_LOG(error) << "NvENC returned empty packet";
       return -1;
@@ -1432,13 +1462,28 @@ namespace video {
     if (frame_nr != encoded_frame.frame_index) {
       BOOST_LOG(error) << "NvENC frame index mismatch " << frame_nr << " " << encoded_frame.frame_index;
     }
-
+    
+    // 创建packet并保存trace信息
     auto packet = std::make_unique<packet_raw_generic>(std::move(encoded_frame.data), encoded_frame.frame_index, encoded_frame.idr);
     packet->channel_data = channel_data;
     packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
     packet->frame_timestamp = frame_timestamp;
+    
+    // 添加trace信息到packet
+    packet->trace_id = traceId;
+    if (has_trace) {
+      packet->has_trace = true;
+      packet->input_arrival_time = input_arrival_time;
+      packet->encode_start_time = encode_start_time;
+      packet->encode_end_time = encode_end_time;
+      
+      // 清理map
+      BOOST_LOG(info) << "nvenc get traceId: " << traceId;
+      std::lock_guard<std::mutex> lock(g_trace_map_mutex);
+      g_trace_map.erase(traceId);
+    }
+    
     packets->raise(std::move(packet));
-
     return 0;
   }
 

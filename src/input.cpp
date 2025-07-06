@@ -16,6 +16,9 @@ extern "C" {
 #include <thread>
 #include <unordered_map>
 
+#include <mutex>
+#include <atomic>
+
 // lib includes
 #include <boost/endian/buffers.hpp>
 
@@ -27,6 +30,7 @@ extern "C" {
 #include "platform/common.h"
 #include "thread_pool.h"
 #include "utility.h"
+#include "video.h"
 
 // Win32 WHEEL_DELTA constant
 #ifndef WHEEL_DELTA
@@ -392,6 +396,12 @@ namespace input {
 
   void print(void *payload) {
     auto header = (PNV_INPUT_HEADER) payload;
+    if (header->traceId > 0) {
+      std::lock_guard<std::mutex> lock(video::g_trace_map_mutex);
+      video::g_trace_map[header->traceId].input_arrival_time = std::chrono::steady_clock::now();
+      video::g_trace_map[header->traceId].encode_start_recorded = false;
+      video::g_trace_map[header->traceId].encode_end_recorded = false;
+    }
 
     switch (util::endian::little(header->magic)) {
       case MOUSE_MOVE_REL_MAGIC_GEN5:
