@@ -265,5 +265,12 @@ namespace nvenc {
     }
   }
 
+  bool nvenc_d3d11_on_cuda::dump_frame_to_cpu(std::vector<uint8_t>& out_rgba, int x1, int y1, int x2, int y2) {
+    // 对于CUDA interop模式，我们暂时返回false，因为实现比较复杂
+    // 需要将CUDA内存拷贝到CPU，然后转换为RGBA格式
+    BOOST_LOG(debug) << "dump_frame_to_cpu not implemented for CUDA interop mode";
+    return false;
+  }
+
 }  // namespace nvenc
 #endif

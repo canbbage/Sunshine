@@ -1341,8 +1341,7 @@ namespace stream {
             packet_raw->encode_start_time.time_since_epoch()).count();
           frame_header.encodeEndTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
             packet_raw->encode_end_time.time_since_epoch()).count();
-            
-          BOOST_LOG(verbose) << "Sending frame with traceId: " << frame_header.traceId
+          BOOST_LOG(info) << "Sending frame with traceId: " << frame_header.traceId
                             << ", input time: " << frame_header.inputArrivalTimeNs
                             << ", encode start: " << frame_header.encodeStartTimeNs
                             << ", encode end: " << frame_header.encodeEndTimeNs;

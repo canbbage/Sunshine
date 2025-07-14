@@ -11,6 +11,7 @@
 #include "video_colorspace.h"
 #include <mutex>
 #include <unordered_map>
+#include <atomic>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -364,13 +365,12 @@ namespace video {
    */
   int probe_encoders();
 
-  struct TraceInfo {
-    std::chrono::steady_clock::time_point input_arrival_time;
-    std::chrono::steady_clock::time_point encode_start_time;
-    std::chrono::steady_clock::time_point encode_end_time;
-    std::atomic<bool> encode_start_recorded{false};
-    std::atomic<bool> encode_end_recorded{false};
-  };
-  extern std::unordered_map<uint32_t, TraceInfo> g_trace_map;
-  extern std::mutex g_trace_map_mutex;
+  extern std::chrono::steady_clock::time_point input_arrival_time;
+  extern float rectX;
+  extern float rectY;
+  extern float rectWidth;
+  extern float rectHeight;
+
+  extern std::mutex g_trace_mutex;
+  extern std::atomic<uint32_t> active_trace_id;
 }  // namespace video

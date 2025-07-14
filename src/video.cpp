@@ -40,8 +40,14 @@ using namespace std::literals;
 
 namespace video {
 
-  std::unordered_map<uint32_t, TraceInfo> g_trace_map;
-  std::mutex g_trace_map_mutex;
+  std::chrono::steady_clock::time_point input_arrival_time;
+  float rectX = -1;
+  float rectY = -1;
+  float rectWidth = -1;
+  float rectHeight = -1;
+
+  std::mutex g_trace_mutex;
+  std::atomic<uint32_t> active_trace_id{0};
 
   namespace {
     /**
@@ -72,6 +78,7 @@ namespace video {
       BOOST_LOG(error) << "No display devices are active at the moment! Cannot probe the encoders.";
       return false;
     }
+    std::vector<uint8_t> g_prev_roi_pixels;
   }  // namespace
 
   void free_ctx(AVCodecContext *ctx) {
@@ -415,6 +422,30 @@ namespace video {
       auto result = device->nvenc->encode_frame(frame_index, force_idr);
       force_idr = false;
       return result;
+    }
+
+    // 添加公共方法来访问dump_frame_to_cpu功能
+    bool dump_frame_to_cpu(std::vector<uint8_t>& out_rgba, int x1, int y1, int x2, int y2) {
+      if (!device || !device->nvenc) {
+        return false;
+      }
+      return device->nvenc->dump_frame_to_cpu(out_rgba, x1, y1, x2, y2);
+    }
+
+    // 添加公共方法来获取宽度
+    int get_width() const {
+      if (!device || !device->nvenc) {
+        return 0;
+      }
+      return device->nvenc->get_width();
+    }
+
+    // 添加公共方法来获取高度
+    int get_height() const {
+      if (!device || !device->nvenc) {
+        return 0;
+      }
+      return device->nvenc->get_height();
     }
 
   private:
@@ -1425,34 +1456,111 @@ namespace video {
     return 0;
   }
 
-  int encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
-    uint32_t traceId = 0;
-    std::chrono::steady_clock::time_point input_arrival_time, encode_start_time, encode_end_time;
-    bool has_trace = false;
-    {
-        std::lock_guard<std::mutex> lock(g_trace_map_mutex);
-        for (auto &kv : g_trace_map) {
-            if (!kv.second.encode_start_recorded) {
-                traceId = kv.first;
-                input_arrival_time = kv.second.input_arrival_time;
-                kv.second.encode_start_time = std::chrono::steady_clock::now();
-                kv.second.encode_start_recorded = true;
-                has_trace = true;
-                break;
-            }
-        }
+  static uint64_t calc_roi_diff(const uint8_t* cur, const uint8_t* prev, int roi_w, int roi_h) {
+    if (!cur || !prev || roi_w <= 0 || roi_h <= 0) {
+        return 0;
     }
-    if (has_trace) {
-        encode_start_time = g_trace_map[traceId].encode_start_time;
+    
+    uint64_t diff = 0;
+    int total_pixels = roi_w * roi_h; // 只对Y分量
+    
+    // 添加边界检查，防止越界访问
+    for (int i = 0; i < total_pixels && i < 1000000; ++i) { // 添加最大像素数限制
+        diff += std::abs(int(cur[i]) - int(prev[i]));
+    }
+    return diff;
+  }
+
+  int encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+    
+    // 获取分辨率，通过session的公共方法获取
+    int width = session.get_width();
+    int height = session.get_height();
+    int roi_x1, roi_y1, roi_x2, roi_y2;
+    uint64_t roi_threshold;
+    float local_rectX, local_rectY, local_rectWidth, local_rectHeight;
+    std::chrono::steady_clock::time_point local_input_arrival_time;
+    {
+        std::lock_guard<std::mutex> lock(g_trace_mutex);
+        local_rectX = rectX;
+        local_rectY = rectY;
+        local_rectWidth = rectWidth;
+        local_rectHeight = rectHeight;
+        local_input_arrival_time = input_arrival_time;
+    }
+    roi_x1 = static_cast<int>(local_rectX * width);
+    roi_y1 = static_cast<int>(local_rectY * height);
+    roi_x2 = static_cast<int>((local_rectX + local_rectWidth) * width);
+    roi_y2 = static_cast<int>((local_rectY + local_rectHeight) * height);
+    static float roi_threshold_factor = []() {
+      
+      float val = 2.0f;
+      FILE* f = fopen("roi_factor.txt", "r");
+      if (f) {
+          if (fscanf(f, "%f", &val) != 1) {
+              val = 2.0f;
+          }
+          fclose(f);
+      }
+      BOOST_LOG(info) << "roi_threshold_factor: " << val << " confirm one time***************************************************************!!!";
+      return val;
+    }();
+    roi_threshold = static_cast<uint64_t>(roi_threshold_factor * local_rectWidth * local_rectHeight * width * height);
+    std::vector<uint8_t> cur_roi_pixels;
+    bool detected = false;
+
+    std::chrono::steady_clock::time_point roi_start_time, roi_end_time;
+    std::chrono::steady_clock::duration roi_diff_time;
+    
+
+    // 安全的像素检测逻辑
+    if (roi_x1 > 0) {
+
+      roi_start_time = std::chrono::steady_clock::now();
+
+      session.dump_frame_to_cpu(cur_roi_pixels, roi_x1, roi_y1, roi_x2, roi_y2);
+            
+      int roi_w = roi_x2 - roi_x1;
+      int roi_h = roi_y2 - roi_y1;
+      
+      // 检查ROI区域是否有效
+      if (active_trace_id > 0 && roi_w > 0 && roi_h > 0) {
+          if (g_prev_roi_pixels.size() == cur_roi_pixels.size() && !cur_roi_pixels.empty()) {
+              uint64_t diff = calc_roi_diff(cur_roi_pixels.data(), g_prev_roi_pixels.data(), roi_w, roi_h);
+              roi_end_time = std::chrono::steady_clock::now();
+              roi_diff_time = roi_end_time - roi_start_time;
+              {
+                //BOOST_LOG(info) << "width: " << width << " height: " << height << " roi_x1: " << roi_x1 << " roi_y1: " << roi_y1 << " roi_x2: " << roi_x2 << " roi_y2: " << roi_y2;
+                BOOST_LOG(info) << "diff: " << diff << " roi_threshold: " << roi_threshold;
+                BOOST_LOG(info) << "roi_diff_time: " << std::chrono::duration_cast<std::chrono::nanoseconds>(roi_diff_time).count();
+              }
+              if (diff > roi_threshold) {
+                  //std::lock_guard<std::mutex> lock(g_trace_mutex);
+                  detected = true;
+                  BOOST_LOG(info) << "change detected";
+                  //rectX = -1;
+                  //rectY = -1;
+                  //rectWidth = -1;
+                  //rectHeight = -1;
+                  //BOOST_LOG(info) << "roi_x1: " << roi_x1 << " roi_y1: " << roi_y1 << " roi_x2: " << roi_x2 << " roi_y2: " << roi_y2;
+              }
+          }
+          
+      } 
+      g_prev_roi_pixels = std::move(cur_roi_pixels);
+  
+    }
+    
+    std::chrono::steady_clock::time_point encode_start_time, encode_end_time;
+    
+    if (detected && active_trace_id > 0) {
+        encode_start_time = std::chrono::steady_clock::now();
     }
     // 编码开始
     auto encoded_frame = session.encode_frame(frame_nr);
     // 编码结束
-    if (has_trace) {
-        std::lock_guard<std::mutex> lock(g_trace_map_mutex);
-        g_trace_map[traceId].encode_end_time = std::chrono::steady_clock::now();
-        g_trace_map[traceId].encode_end_recorded = true;
-        encode_end_time = g_trace_map[traceId].encode_end_time;
+    if (detected && active_trace_id > 0) {
+        encode_end_time = std::chrono::steady_clock::now();
     }
     if (encoded_frame.data.empty()) {
       BOOST_LOG(error) << "NvENC returned empty packet";
@@ -1468,19 +1576,20 @@ namespace video {
     packet->channel_data = channel_data;
     packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
     packet->frame_timestamp = frame_timestamp;
+    packet->has_trace = false;
     
     // 添加trace信息到packet
-    packet->trace_id = traceId;
-    if (has_trace) {
+    if (active_trace_id > 0) {
+      BOOST_LOG(info) << "nvenc get traceId: " << active_trace_id;
+    }
+    if (detected && active_trace_id > 0) {
+      std::lock_guard<std::mutex> lock(g_trace_mutex);
+      packet->trace_id = active_trace_id;
       packet->has_trace = true;
-      packet->input_arrival_time = input_arrival_time;
+      packet->input_arrival_time = local_input_arrival_time;
       packet->encode_start_time = encode_start_time;
       packet->encode_end_time = encode_end_time;
-      
-      // 清理map
-      BOOST_LOG(info) << "nvenc get traceId: " << traceId;
-      std::lock_guard<std::mutex> lock(g_trace_map_mutex);
-      g_trace_map.erase(traceId);
+      active_trace_id = 0;
     }
     
     packets->raise(std::move(packet));

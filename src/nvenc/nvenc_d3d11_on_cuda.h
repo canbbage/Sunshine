@@ -27,6 +27,9 @@ namespace nvenc {
 
     ID3D11Texture2D *get_input_texture() override;
 
+    // 实现基类的纯虚函数
+    bool dump_frame_to_cpu(std::vector<uint8_t>& out_rgba, int x1, int y1, int x2, int y2) override;
+
   private:
     bool init_library() override;
 

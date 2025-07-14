@@ -69,6 +69,25 @@ namespace nvenc {
      */
     bool invalidate_ref_frames(uint64_t first_frame, uint64_t last_frame);
 
+    // 新增：将当前帧dump到CPU
+    virtual bool dump_frame_to_cpu(std::vector<uint8_t>& out_rgba, int x1, int y1, int x2, int y2) = 0;
+
+    /**
+     * @brief Get the current encoder width
+     * @return Current encoder width
+     */
+    int get_width() const {
+      return encoder_params.width;
+    }
+
+    /**
+     * @brief Get the current encoder height
+     * @return Current encoder height
+     */
+    int get_height() const {
+      return encoder_params.height;
+    }
+
   protected:
     /**
      * @brief Required. Used for loading NvEnc library and setting `nvenc` variable with `NvEncodeAPICreateInstance()`.

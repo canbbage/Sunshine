@@ -396,11 +396,16 @@ namespace input {
 
   void print(void *payload) {
     auto header = (PNV_INPUT_HEADER) payload;
-    if (header->traceId > 0) {
-      std::lock_guard<std::mutex> lock(video::g_trace_map_mutex);
-      video::g_trace_map[header->traceId].input_arrival_time = std::chrono::steady_clock::now();
-      video::g_trace_map[header->traceId].encode_start_recorded = false;
-      video::g_trace_map[header->traceId].encode_end_recorded = false;
+    //BOOST_LOG(info) << "header->traceId: " << header->traceId;
+    if (header->traceId > 0 && video::active_trace_id == 0) {
+      std::lock_guard<std::mutex> lock(video::g_trace_mutex);
+
+      video::active_trace_id = header->traceId;
+      video::input_arrival_time = std::chrono::steady_clock::now();
+      video::rectX = header->rectX;
+      video::rectY = header->rectY;
+      video::rectWidth = header->rectWidth;
+      video::rectHeight = header->rectHeight;
     }
 
     switch (util::endian::little(header->magic)) {
