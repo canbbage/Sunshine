@@ -48,6 +48,7 @@ namespace video {
 
   std::mutex g_trace_mutex;
   std::atomic<uint32_t> active_trace_id{0};
+  std::atomic<uint32_t> active_detected{0};
 
   namespace {
     /**
@@ -1479,7 +1480,9 @@ namespace video {
     int roi_x1, roi_y1, roi_x2, roi_y2;
     uint64_t roi_threshold;
     float local_rectX, local_rectY, local_rectWidth, local_rectHeight;
+    uint32_t local_detected;
     std::chrono::steady_clock::time_point local_input_arrival_time;
+    uint32_t local_trace_id;
     {
         std::lock_guard<std::mutex> lock(g_trace_mutex);
         local_rectX = rectX;
@@ -1487,6 +1490,8 @@ namespace video {
         local_rectWidth = rectWidth;
         local_rectHeight = rectHeight;
         local_input_arrival_time = input_arrival_time;
+        local_detected = active_detected;
+        local_trace_id = active_trace_id;
     }
     roi_x1 = static_cast<int>(local_rectX * width);
     roi_y1 = static_cast<int>(local_rectY * height);
@@ -1524,7 +1529,7 @@ namespace video {
       int roi_h = roi_y2 - roi_y1;
       
       // 检查ROI区域是否有效
-      if (active_trace_id > 0 && roi_w > 0 && roi_h > 0) {
+      if (local_trace_id > 0 && local_detected == 0 && roi_w > 0 && roi_h > 0) {
           if (g_prev_roi_pixels.size() == cur_roi_pixels.size() && !cur_roi_pixels.empty()) {
               uint64_t diff = calc_roi_diff(cur_roi_pixels.data(), g_prev_roi_pixels.data(), roi_w, roi_h);
               roi_end_time = std::chrono::steady_clock::now();
@@ -1536,7 +1541,8 @@ namespace video {
               }
               if (diff > roi_threshold) {
                   //std::lock_guard<std::mutex> lock(g_trace_mutex);
-                  detected = true;
+                  //detected = true;
+                  local_detected = 1;
                   BOOST_LOG(info) << "change detected";
                   //rectX = -1;
                   //rectY = -1;
@@ -1553,13 +1559,13 @@ namespace video {
     
     std::chrono::steady_clock::time_point encode_start_time, encode_end_time;
     
-    if (detected && active_trace_id > 0) {
+    if (local_detected > 0) {
         encode_start_time = std::chrono::steady_clock::now();
     }
     // 编码开始
     auto encoded_frame = session.encode_frame(frame_nr);
     // 编码结束
-    if (detected && active_trace_id > 0) {
+    if (local_detected > 0) {
         encode_end_time = std::chrono::steady_clock::now();
     }
     if (encoded_frame.data.empty()) {
@@ -1579,17 +1585,18 @@ namespace video {
     packet->has_trace = false;
     
     // 添加trace信息到packet
-    if (active_trace_id > 0) {
-      BOOST_LOG(info) << "nvenc get traceId: " << active_trace_id;
-    }
-    if (detected && active_trace_id > 0) {
+    //if (active_trace_id > 0) {
+    //  BOOST_LOG(info) << "nvenc get traceId: " << active_trace_id;
+    //}
+    if (local_detected > 0) {
       std::lock_guard<std::mutex> lock(g_trace_mutex);
-      packet->trace_id = active_trace_id;
+      packet->trace_id = local_trace_id;
       packet->has_trace = true;
       packet->input_arrival_time = local_input_arrival_time;
       packet->encode_start_time = encode_start_time;
       packet->encode_end_time = encode_end_time;
-      active_trace_id = 0;
+      active_detected = 1;
+      //active_trace_id = 0;
     }
     
     packets->raise(std::move(packet));

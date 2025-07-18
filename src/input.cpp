@@ -397,10 +397,11 @@ namespace input {
   void print(void *payload) {
     auto header = (PNV_INPUT_HEADER) payload;
     //BOOST_LOG(info) << "header->traceId: " << header->traceId;
-    if (header->traceId > 0 && video::active_trace_id == 0) {
+    if (header->traceId > 0) {
       std::lock_guard<std::mutex> lock(video::g_trace_mutex);
 
       video::active_trace_id = header->traceId;
+      video::active_detected = 0;
       video::input_arrival_time = std::chrono::steady_clock::now();
       video::rectX = header->rectX;
       video::rectY = header->rectY;

@@ -373,4 +373,5 @@ namespace video {
 
   extern std::mutex g_trace_mutex;
   extern std::atomic<uint32_t> active_trace_id;
+  extern std::atomic<uint32_t> active_detected;
 }  // namespace video
