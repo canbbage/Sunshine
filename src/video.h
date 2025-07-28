@@ -305,6 +305,10 @@ namespace video {
     int64_t frame_index() override {
       return index;
     }
+    // 添加 setter 函数  
+    void set_frame_index(int64_t new_index) {  
+      index = new_index;  
+  }
 
     uint8_t *data() override {
       return frame_data.data();

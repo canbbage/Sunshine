@@ -411,6 +411,7 @@ namespace video {
       }
 
       if (!device->nvenc->invalidate_ref_frames(first_frame, last_frame)) {
+        BOOST_LOG(info) << "invalidate_ref_frames failed, force idr" << first_frame << "," << last_frame;
         force_idr = true;
       }
     }
@@ -1598,8 +1599,39 @@ namespace video {
       active_detected = 1;
       //active_trace_id = 0;
     }
+
+    if (1) {  
+      auto original_frame_index = packet->frame_index();  
+
+      if (packet->is_idr()) {
+        BOOST_LOG(info) << "**********************************************************is idr frame: " << packet->is_idr();
+      }
+
+      //BOOST_LOG(info) << "is idr frame: " << packet->is_idr();
+
+      {
+          // 创建 USVC0 帧的副本，只修改 frameIndex  
+          auto usvc0_packet = std::make_unique<packet_raw_generic>(*packet);  
+          usvc0_packet->set_frame_index(2*original_frame_index-1);  // frameIndex = 2t-1 
+          packets->raise(std::move(usvc0_packet)); 
+
+          std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      
+          // 创建 USVC1 帧的副本，只修改 frameIndex    
+          auto usvc1_packet = std::make_unique<packet_raw_generic>(*packet);  
+          usvc1_packet->set_frame_index(2*original_frame_index);  // frameIndex = 2t  
+          packets->raise(std::move(usvc1_packet));
+
+          BOOST_LOG(info) << "send usvc0 and usvc1 " << original_frame_index;
+
+      }
+      
+    } else {  
+      // 正常模式，发送原始包  
+      packets->raise(std::move(packet));  
+    }
     
-    packets->raise(std::move(packet));
+    //packets->raise(std::move(packet));
     return 0;
   }
 

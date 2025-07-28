@@ -953,6 +953,8 @@ namespace stream {
     server->map(packetTypes[IDX_REQUEST_IDR_FRAME], [&](session_t *session, const std::string_view &payload) {
       BOOST_LOG(debug) << "type [IDX_REQUEST_IDR_FRAME]"sv;
 
+      BOOST_LOG(info) << "IDR frame requested by Moonlight client";  
+
       session->video.idr_events->raise(true);
     });
 
@@ -1372,7 +1374,17 @@ namespace stream {
         frame_header.frame_processing_latency = 0;
       }
 
-      auto fecPercentage = config::stream.fec_percentage;
+      // 根据帧类型和frameIndex设置fec比例
+      int frameIndex = packet->frame_index();
+      int fecPercentage;
+      
+      if (frame_header.frameType == 2) {
+        // I帧：2t和2t+1都是
+        fecPercentage = 30;
+      } else {
+        // P帧：2t-1帧为，2t帧为
+        fecPercentage = (frameIndex % 2 == 1) ? 10 : 100;
+      }
 
       // Insert space for packet headers
       auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
